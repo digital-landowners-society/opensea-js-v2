@@ -64,6 +64,9 @@ export class OpenSeaAPI {
   private chain: Chain;
   private retryDelay = 3000;
 
+  private collectionCache: Map<string, OpenSeaCollection> = new Map();
+  private paymentTokenCache: Map<string, OpenSeaFungibleToken> = new Map();
+
   /**
    * Create an instance of the OpenSea API
    * @param config OpenSeaAPIConfig for setting up the API, including an optional API key, Chain name, and base URL
@@ -301,9 +304,28 @@ export class OpenSeaAPI {
    * Fetch a collection through the API
    */
   public async getCollection(slug: string): Promise<OpenSeaCollection> {
-    const path = getCollectionPath(slug);
-    const response = await this.get<GetCollectionResponse>(path);
-    return collectionFromJSON(response.collection);
+    let collection = this.collectionCache.get(slug);
+    if (!collection) {
+      const path = getCollectionPath(slug);
+      const response = await this.get<GetCollectionResponse>(path);
+      collection = collectionFromJSON(response.collection);
+      this.collectionCache.set(slug, collection);
+    }
+    return collection;
+  }
+
+  public async getPaymentToken(
+    tokenAddress: string
+  ): Promise<OpenSeaFungibleToken> {
+    let paymentToken = this.paymentTokenCache.get(tokenAddress);
+    if (!paymentToken) {
+      const { tokens } = await this.getPaymentTokens({
+        address: tokenAddress.toLowerCase(),
+      });
+      paymentToken = tokens[0];
+      this.paymentTokenCache.set(tokenAddress, paymentToken);
+    }
+    return paymentToken;
   }
 
   /**

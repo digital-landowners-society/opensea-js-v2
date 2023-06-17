@@ -1,6 +1,9 @@
 import EventEmitter = require("events");
 import { Seaport } from "@opensea/seaport-js";
-import { OPENSEA_CONDUIT_KEY } from "@opensea/seaport-js/lib/constants";
+import {
+  ItemType,
+  OPENSEA_CONDUIT_KEY,
+} from "@opensea/seaport-js/lib/constants";
 import {
   ConsiderationInputItem,
   CreateInputItem,
@@ -306,6 +309,88 @@ export class OpenSeaSDK {
       identifier: asset.tokenId ?? undefined,
       amount: quantities[index].toString() ?? "1",
     }));
+  }
+
+  public async createFixedNftBuyOrder({
+    slug,
+    tokenAddress,
+    tokenId,
+    accountAddress,
+    startAmount,
+    domain,
+    salt,
+    expirationTime,
+  }: {
+    slug: string;
+    tokenAddress: string;
+    tokenId: string;
+    accountAddress: string;
+    startAmount: BigNumberish;
+    quantity?: BigNumberish;
+    domain?: string;
+    salt?: BigNumberish;
+    expirationTime?: BigNumberish;
+  }) {
+    if (!tokenId) {
+      throw new Error("Asset must have a tokenId");
+    }
+    const paymentTokenAddress = WETH_ADDRESS_BY_NETWORK[this.chain];
+    const collection = await this.api.getCollection(slug);
+    const considerationAssetItems = [
+      {
+        itemType: ItemType.ERC721,
+        token: tokenAddress,
+        identifier: tokenId,
+        amount: "1",
+      },
+    ];
+
+    const { basePrice } = await this._getPriceParameters(
+      OrderSide.Buy,
+      paymentTokenAddress,
+      expirationTime ?? getMaxOrderExpirationTimestamp(),
+      startAmount
+    );
+
+    const { openseaSellerFees, collectionSellerFees: collectionSellerFees } =
+      await this.getFees({
+        collection,
+        paymentTokenAddress,
+        startAmount: basePrice,
+      });
+    const considerationFeeItems = [
+      ...openseaSellerFees,
+      ...collectionSellerFees,
+    ];
+
+    const { executeAllActions } = await this.seaport_v1_5.createOrder(
+      {
+        offer: [
+          {
+            token: paymentTokenAddress,
+            amount: basePrice.toString(),
+          },
+        ],
+        consideration: [...considerationAssetItems, ...considerationFeeItems],
+        endTime:
+          expirationTime !== undefined
+            ? BigNumber.from(expirationTime).toString()
+            : getMaxOrderExpirationTimestamp().toString(),
+        zone: DEFAULT_ZONE_BY_NETWORK[this.chain],
+        domain,
+        salt: BigNumber.from(salt ?? 0).toString(),
+        restrictedByZone: false,
+        allowPartialFills: true,
+      },
+      accountAddress
+    );
+    const order = await executeAllActions();
+
+    return this.api.postOrder(order, {
+      protocol: "seaport",
+      protocolAddress: DEFAULT_SEAPORT_CONTRACT_ADDRESS,
+      side: "bid",
+    });
   }
 
   /**
@@ -934,13 +1019,9 @@ export class OpenSeaSDK {
     englishAuctionReservePrice?: BigNumberish
   ) {
     const isEther = tokenAddress === ethers.constants.AddressZero;
-    let paymentToken;
-    if (!isEther) {
-      const { tokens } = await this.api.getPaymentTokens({
-        address: tokenAddress.toLowerCase(),
-      });
-      paymentToken = tokens[0];
-    }
+    const paymentToken = !isEther
+      ? await this.api.getPaymentToken(tokenAddress.toLowerCase())
+      : undefined;
     const decimals = paymentToken?.decimals ?? 18;
 
     const startAmountWei = ethers.utils.parseUnits(
