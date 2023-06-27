@@ -101,6 +101,7 @@ export class OpenSeaSDK {
 
     this.seaport_v1_5 = new Seaport(this._signerOrProvider, {
       overrides: { defaultConduitKey: OPENSEA_CONDUIT_KEY },
+      balanceAndApprovalChecksOnOrderCreation: false,
     });
 
     // Emit events
@@ -381,16 +382,11 @@ export class OpenSeaSDK {
         salt: BigNumber.from(salt ?? 0).toString(),
         restrictedByZone: false,
         allowPartialFills: true,
+        counter: 0,
       },
       accountAddress
     );
-    const order = await executeAllActions();
-
-    return this.api.postOrder(order, {
-      protocol: "seaport",
-      protocolAddress: DEFAULT_SEAPORT_CONTRACT_ADDRESS,
-      side: "bid",
-    });
+    return await executeAllActions();
   }
 
   /**
